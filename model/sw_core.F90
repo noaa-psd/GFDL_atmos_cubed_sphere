@@ -964,8 +964,8 @@
         enddo 
 
 #ifndef SW_DYNAMICS
-        do j=jsd,jed
-           do i=isd,ied
+        do j=js,je
+           do i=is,ie
               heat_source(i,j) = 0.
               diss_est(i,j) = 0.
            enddo
