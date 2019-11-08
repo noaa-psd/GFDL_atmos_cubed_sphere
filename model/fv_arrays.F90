@@ -221,6 +221,7 @@ module fv_arrays_mod
 
      real  :: acapN, acapS
      real  :: globalarea  !< total Global Area
+     real  :: dxAV  ! averge length of a grid cell edo
      
      logical :: latlon = .false.
      logical :: cubed_sphere = .false.
@@ -1228,6 +1229,8 @@ module fv_arrays_mod
     real, _ALLOCATABLE :: ts(:,:)       _NULL  !< skin temperature (sst) from NCEP/GFS (K) -- tile
 ! For stochastic kinetic energy backscatter (SKEB)
     real, _ALLOCATABLE :: diss_est(:,:,:) _NULL !< dissipation estimate taken from 'heat_source'
+    real, _ALLOCATABLE :: urandom_c(:,:,:)   _NULL  ! random u-wind on d grid - grid relative
+    real, _ALLOCATABLE :: vrandom_c(:,:,:)   _NULL  ! random v-wind on d grid - grid relative
  
 !-----------------------------------------------------------------------
 ! Others:
@@ -1470,6 +1473,8 @@ contains
 
     ! Allocate others
     allocate ( Atm%diss_est(isd:ied  ,jsd:jed  ,npz) ) ; Atm%diss_est=real_snan
+    allocate (   Atm%urandom_c(isd:ied+1,jsd:jed  ,npz) ); Atm%urandom_c=0.0
+    allocate (   Atm%vrandom_c(isd:ied  ,jsd:jed+1,npz) ); Atm%vrandom_c=0.0
     allocate ( Atm%ts(is:ie,js:je) ) ; Atm%ts=real_snan
     allocate ( Atm%phis(isd:ied  ,jsd:jed  ) ) ; Atm%phis=real_snan
     allocate ( Atm%omga(isd:ied  ,jsd:jed  ,npz) ); Atm%omga=0.

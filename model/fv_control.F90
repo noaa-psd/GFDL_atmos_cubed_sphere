@@ -161,6 +161,7 @@ module fv_control_mod
 
    implicit none
    private
+   public setup_pointers
 
 !-----------------------------------------------------------------------
 ! Grid descriptor file setup

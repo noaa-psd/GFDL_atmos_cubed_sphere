@@ -218,7 +218,7 @@ contains
     else 
        atm_mosaic = trim(grid_file)
     endif
-
+    print*,'before get_mosaic_tile',atm_mosaic
     call get_mosaic_tile_grid(atm_hgrid, atm_mosaic, Atm%domain)
 
     grid_form = "none"    
@@ -237,7 +237,7 @@ contains
       if(nregions .NE. 6) call mpp_error(FATAL, &
          'fv_grid_tools(read_grid): nregions should be 6 when reading from mosaic file '//trim(grid_file) )
     endif
-
+    print*,'getting att values x'
     call get_var_att_value(atm_hgrid, 'x', 'units', units)
 
     !--- get the geographical coordinates of super-grid.
@@ -252,8 +252,12 @@ contains
     start = 1; nread = 1
     start(1) = isc2; nread(1) = iec2 - isc2 + 1
     start(2) = jsc2; nread(2) = jec2 - jsc2 + 1
+    print*,'isc2,iec2,jsc2,jec2=',isc2,iec2,jsc2,jec2
+    print*,'reading data x',size(tmpx),start
     call read_data(atm_hgrid, 'x', tmpx, start, nread, no_domain=.TRUE.)  !<-- tmpx (lon, deg east) is on the supergrid
+    print*,'reading data y'
     call read_data(atm_hgrid, 'y', tmpy, start, nread, no_domain=.TRUE.)  !<-- tmpy (lat, deg) is on the supergrid
+    print*,'past_reading data'
 
     !--- geographic grid at cell corner
     grid(isd: is-1, jsd:js-1,1:ndims)=0.
@@ -660,6 +664,7 @@ contains
     cubed_sphere = .false.
 
     if ( Atm%flagstruct%do_schmidt .and. abs(atm%flagstruct%stretch_fac-1.) > 1.E-5 ) stretched_grid = .true.
+    print*,'in fv_grid',stretched_grid
 
     if (Atm%flagstruct%grid_type>3) then
        if (Atm%flagstruct%grid_type == 4) then
@@ -1131,17 +1136,18 @@ contains
        call mpp_max(aspM)
        call mpp_min(aspN)
 
+       Atm%gridstruct%dxAV  = dxAV  / ( (ceiling(npy/2.0))*(ceiling(npx/2.0)) )
        if( is_master() ) then
 
           angAV = angAV / ( (ceiling(npy/2.0))*(ceiling(npx/2.0)) - 1 )
-          dxAV  = dxAV  / ( (ceiling(npy/2.0))*(ceiling(npx/2.0)) )
+          !dxAV  = dxAV  / ( (ceiling(npy/2.0))*(ceiling(npx/2.0)) )
           aspAV = aspAV / ( (ceiling(npy/2.0))*(ceiling(npx/2.0)) )
           write(*,*  ) ''
 #ifdef SMALL_EARTH
           write(*,*) ' REDUCED EARTH: Radius is ', radius, ', omega is ', omega
 #endif
           write(*,*  ) ' Cubed-Sphere Grid Stats : ', npx,'x',npy,'x',nregions
-!xxxxxxx  write(*,201) '      Grid Length               : min: ', dxN,' max: ', dxM,' avg: ', dxAV, ' min/max: ',dxN/dxM
+!xxxxxxx  write(*,201) '      Grid Length               : min: ', dxN,' max: ', dxM,' avg: ', Atm%gridstruct%dxAV, ' min/max: ',dxN/dxM
           write(*,200) '      Deviation from Orthogonal : min: ',angN,' max: ',angM,' avg: ',angAV
           write(*,200) '      Aspect Ratio              : min: ',aspN,' max: ',aspM,' avg: ',aspAV
           write(*,*  ) ''
@@ -2096,8 +2102,8 @@ contains
          minarea =  1.e25
 
          globalarea = 0.0
-         do j=js-nh,je+nh
-            do i=is-nh,ie+nh
+         do j=js-nh,je+nh+1 !PJP
+            do i=is-nh,ie+nh+1 !PJP
                do n=1,ndims
                if ( gridstruct%stretched_grid .or. nested ) then
                   p_lL(n) = grid(i  ,j  ,n)

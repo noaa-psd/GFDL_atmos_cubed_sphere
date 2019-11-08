@@ -146,7 +146,7 @@ module dyn_core_mod
 implicit none
 private
 
-public :: dyn_core, del2_cubed, init_ijk_mem
+public :: dyn_core, del2_cubed, init_ijk_mem,box_mean,make_a_winds,make_c_winds
 
   real :: ptk, peln1, rgrav
   real :: d3_damp
@@ -2065,6 +2065,77 @@ enddo    ! end k-loop
 
 end subroutine one_grad_p
 
+subroutine make_a_winds(ua, va, psi, ng, gridstruct, bd, npx, npy)
+
+integer, intent(IN) :: ng, npx, npy
+type(fv_grid_bounds_type), intent(IN) :: bd
+real,    intent(inout) :: psi(bd%isd:bd%ied,bd%jsd:bd%jed)
+real, intent(inout) ::      ua(bd%isc:bd%iec  ,bd%jsc:bd%jec )
+real, intent(inout) ::      va(bd%isc:bd%iec  ,bd%jsc:bd%jec )
+type(fv_grid_type), intent(IN), target :: gridstruct
+! Local:
+real, dimension(bd%isd:bd%ied,bd%jsd:bd%jed) :: wk
+real, dimension(bd%isc:bd%iec,bd%jsc:bd%jec) :: u,v 
+integer i,j
+
+integer :: is,  ie,  js,  je
+is  = bd%is
+ie  = bd%ie
+js  = bd%js
+je  = bd%je
+
+call a2b_ord4( psi, wk, gridstruct, npx, npy, is, ie, js, je, ng, .false.)
+do j=js,je
+   do i=is,ie
+      u(i,j) = gridstruct%rdy(i,j)*0.5*(wk(i,j+1)+wk(i+1,j+1)-(wk(i,j)+wk(i+1,j)))
+   enddo
+enddo
+do j=js,je
+   do i=is,ie
+      v(i,j) = gridstruct%rdx(i,j)*0.5*(wk(i,j)+wk(i,j+1)-(wk(i+1,j)+wk(i+1,j+1)))
+   enddo
+enddo
+do j=js,je
+   do i=is,ie
+      ua(i,j) = 0.5*(gridstruct%a11(i,j)+gridstruct%a11(i,j+1))*u(i,j) + 0.5*(gridstruct%a12(i,j)+gridstruct%a12(i,j+1))*v(i,j)
+      va(i,j) = 0.5*(gridstruct%a21(i,j)+gridstruct%a21(i+1,j))*u(i,j) + 0.5*(gridstruct%a22(i,j)+gridstruct%a22(i+1,j))*v(i,j)
+   enddo
+enddo
+
+end subroutine make_a_winds
+
+subroutine make_c_winds(uc, vc, psi, ng, gridstruct, bd, npx, npy)
+
+integer, intent(IN) :: ng, npx, npy
+type(fv_grid_bounds_type), intent(IN) :: bd
+real,    intent(inout) :: psi(bd%isd:bd%ied,bd%jsd:bd%jed)
+real, intent(inout) ::      uc(bd%isc:bd%iec+1 ,bd%jsc:bd%jec )
+real, intent(inout) ::      vc(bd%isc:bd%iec   ,bd%jsc:bd%jec+1)
+type(fv_grid_type), intent(IN), target :: gridstruct
+! Local:
+real, dimension(bd%isd:bd%ied,bd%jsd:bd%jed) :: wk
+real, dimension(bd%isc:bd%iec,bd%jsc:bd%jec) :: u,v 
+integer i,j
+
+integer :: is,  ie,  js,  je
+is  = bd%is
+ie  = bd%ie
+js  = bd%js
+je  = bd%je
+
+call a2b_ord4( psi, wk, gridstruct, npx, npy, is, ie, js, je, ng, .false.)
+do j=js,je
+   do i=is,ie+1
+      uc(i,j) = gridstruct%rdy(i,j)*(wk(i,j+1)-wk(i,j))
+   enddo
+enddo
+do j=js,je+1
+   do i=is,ie
+      vc(i,j) = gridstruct%rdx(i,j)*(wk(i,j)-wk(i+1,j))
+   enddo
+enddo
+
+end subroutine make_c_winds
 
 subroutine grad1_p_update(divg2, u, v, pk, gz, dt, ng, gridstruct, bd, npx, npy, npz, ptop, beta, a2b_ord)
 
@@ -2466,7 +2537,7 @@ do 1000 j=jfirst,jlast
 
       do n=1,ntimes
          nt = ntimes - n
-
+      
 !$OMP parallel do default(none) shared(km,q,is,ie,js,je,npx,npy, &
 !$OMP                                  nt,isd,jsd,gridstruct,bd, &
 !$OMP                                  cd) &
@@ -2527,6 +2598,107 @@ do 1000 j=jfirst,jlast
       enddo
 
  end subroutine del2_cubed
+
+!>@brief The subroutine 'box_mean' filters a field with a 9-point mean stencil
+
+ subroutine box_mean(q, gridstruct, domain, npx, npy, km, nmax, bd)
+      !---------------------------------------------------------------
+      ! This routine is for filtering the omega field for the physics
+      !---------------------------------------------------------------
+      integer, intent(in):: npx, npy, km, nmax
+      type(fv_grid_bounds_type), intent(IN) :: bd
+      real, intent(inout):: q(bd%isd:bd%ied,bd%jsd:bd%jed,km)
+      type(fv_grid_type), intent(IN), target :: gridstruct
+      type(domain2d), intent(INOUT) :: domain
+      real, parameter:: r3  = 1./3.,r9=1./9.
+      real :: q2(bd%isd:bd%ied,bd%jsd:bd%jed)
+      integer i,j,k, n, nt, ntimes
+      integer :: is,  ie,  js,  je
+      integer :: isd, ied, jsd, jed
+
+      !Local routine pointers
+!     real, pointer, dimension(:,:) :: rarea
+!     real, pointer, dimension(:,:) :: del6_u, del6_v
+!     logical, pointer :: sw_corner, se_corner, ne_corner, nw_corner
+
+      is  = bd%is
+      ie  = bd%ie
+      js  = bd%js
+      je  = bd%je
+      isd = bd%isd
+      ied = bd%ied
+      jsd = bd%jsd
+      jed = bd%jed
+
+      ntimes = min(3, nmax)
+
+      call timing_on('COMM_TOTAL')
+      call mpp_update_domains(q, domain, complete=.true.)
+      call timing_off('COMM_TOTAL')
+
+
+      do n=1,ntimes
+         nt = ntimes !- n
+         print*,'in box mean',is,ie,js,je
+         print*,'in box mean domain',isd,ied,jsd,jed
+         print*,'in box mean others',km,npx,npy,nt   
+
+!$OMP parallel do default(none) shared(km,is,ie,js,je,npx,npy, &
+!$OMP                                  q,nt,isd,jsd,gridstruct,bd) &
+!$OMP                          private(q2)
+         do k=1,km
+
+            if ( gridstruct%sw_corner ) then
+               q(1,1,k) = (q(1,1,k)+q(0,1,k)+q(1,0,k)) * r3
+               q(0,1,k) =  q(1,1,k)
+               q(1,0,k) =  q(1,1,k)
+            endif
+            if ( gridstruct%se_corner ) then
+               q(ie, 1,k) = (q(ie,1,k)+q(npx,1,k)+q(ie,0,k)) * r3
+               q(npx,1,k) =  q(ie,1,k)
+               q(ie, 0,k) =  q(ie,1,k)
+            endif
+            if ( gridstruct%ne_corner ) then
+               q(ie, je,k) = (q(ie,je,k)+q(npx,je,k)+q(ie,npy,k)) * r3
+               q(npx,je,k) =  q(ie,je,k)
+               q(ie,npy,k) =  q(ie,je,k)
+            endif
+            if ( gridstruct%nw_corner ) then
+               q(1, je,k) = (q(1,je,k)+q(0,je,k)+q(1,npy,k)) * r3
+               q(0, je,k) =  q(1,je,k)
+               q(1,npy,k) =  q(1,je,k)
+            endif
+
+            if(nt>0) call copy_corners(q(isd,jsd,k), npx, npy, 1, gridstruct%nested, bd, &
+                 gridstruct%sw_corner, gridstruct%se_corner, gridstruct%nw_corner, gridstruct%ne_corner )
+
+            if(nt>0) call copy_corners(q(isd,jsd,k), npx, npy, 2, gridstruct%nested, bd, &
+                 gridstruct%sw_corner, gridstruct%se_corner, gridstruct%nw_corner, gridstruct%ne_corner)
+
+            !print*,'npx,npy=',npx,npy
+            do j=js-nt,je+nt
+               do i=is-nt,ie+nt
+                  !q2(i,j) = (gridstruct%area(i-1,j+1)*q(i-1,j+1,k) + gridstruct%area(i,j+1)*q(i,j+1,k) + gridstruct%area(i+1,j+1)*q(i+1,j+1,k) +&
+                  !           gridstruct%area(i-1,j  )*q(i-1,j,k)   + gridstruct%area(i,j  )*q(i,j  ,k) + gridstruct%area(i+1,j  )*q(i+1,j  ,k) +&
+                  !           gridstruct%area(i-1,j-1)*q(i-1,j-1,k) + gridstruct%area(i,j-1)*q(i,j-1,k) + gridstruct%area(i+1,j-1)*q(i+1,j-1,k))/SUM(gridstruct%area(i-1:i+1,j-1:j+1))
+                  q2(i,j) = r9*(q(i-1,j+1,k)+q(i,j+1,k)+q(i+1,j+1,k)+q(i-1,j,k)+q(i,j,k)+q(i+1,j,k)+q(i-1,j-1,k)+q(i,j-1,k)+q(i+1,j-1,k))
+                  !if (j.GE. je .AND. i.GE. ie) print*,'area +1=',gridstruct%area(i-1:i+1,j+1)
+                  !if (j.GE. je .AND. i.GE. ie) print*,'area   =',gridstruct%area(i-1:i+1,j)
+                  !if (j.GE. je .AND. i.GE. ie) print*,'area -1=',gridstruct%area(i-1:i+1,j-1)
+                  !if (j.GE. je .AND. i.GE. ie) print*,'q    +1=',q(i-1:i+1,j+1,k)
+                  !if (j.GE. je .AND. i.GE. ie) print*,'q      =',q(i-1:i+1,j,k)
+                  !if (j.GE. je .AND. i.GE. ie) print*,'q    -1=',q(i-1:i+1,j-1,k)
+               enddo
+            enddo
+            do j=js-nt,je+nt
+               do i=is-nt,ie+nt
+                  q(i,j,k)=q2(i,j)
+               enddo
+            enddo
+         enddo
+      enddo
+
+ end subroutine box_mean
 
  subroutine init_ijk_mem(i1, i2, j1, j2, km, array, var)
       integer, intent(in):: i1, i2, j1, j2, km

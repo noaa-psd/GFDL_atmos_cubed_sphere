@@ -250,7 +250,6 @@ contains
  real, intent(inout):: q(bd%isd:bd%ied,bd%jsd:bd%jed)
  logical, intent(IN) :: nested, sw_corner, se_corner, nw_corner, ne_corner
  integer  i,j
-
  if (nested) return
 
  if ( dir == 1 ) then

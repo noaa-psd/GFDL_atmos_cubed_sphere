@@ -374,7 +374,9 @@ contains
          ny = npy-1
 
          !! Init pointers
+         print*,' in domain decomp 0',Atm%pelist,Atm%pelist(1)
          pelist                        => Atm%pelist
+         print*,' in domain decomp 1',pelist(1)
          grid_number                   => Atm%grid_number
          num_contact                   => Atm%num_contact
          domain                        => Atm%domain
@@ -386,6 +388,7 @@ contains
 
 
          call mpp_domains_init(MPP_DOMAIN_TIME)
+         print*,' in domain decomp 2',pelist(1)
 
          select case(nregions)
          case ( 1 )  ! Lat-Lon "cyclic"
@@ -492,16 +495,25 @@ contains
          case default
             call mpp_error(FATAL, 'domain_decomp: no such test: '//type)
          end select
+         print*,' in domain decomp 3',pelist(1)
 
          allocate(layout2D(2,nregions), global_indices(4,nregions), npes_tile(nregions) )
+         print*,' in domain decomp 4',pelist(1)
          allocate(pe_start(nregions),pe_end(nregions))
+         print*,' in domain decomp 5',pelist(1)
          npes_tile = npes_per_tile
+         print*,' in domain decomp 6',pelist(1)
          do n = 1, nregions
+         print*,' in domain decomp 7',pelist(1)
             global_indices(:,n) = (/1,npx-1,1,npy-1/)
+         print*,' in domain decomp 8',pelist(1)
             layout2D(:,n)         = layout
+         print*,' in domain decomp 9',pelist(1)
                pe_start(n) = pelist(1) + (n-1)*layout(1)*layout(2)
+               print*,'pe_start,pelist',pe_start(n),pelist(1),n,layout
             pe_end(n)   = pe_start(n) + layout(1)*layout(2) -1
          end do
+         print*,'PE_END in fv_mp_mod=',PE_END,pe_start,layout
          num_alloc=max(1,num_contact)
          allocate(tile1(num_alloc), tile2(num_alloc) )
          allocate(istart1(num_alloc), iend1(num_alloc), jstart1(num_alloc), jend1(num_alloc) )

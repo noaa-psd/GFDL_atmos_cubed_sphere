@@ -213,7 +213,9 @@ public :: atmosphere_resolution,   atmosphere_grid_bdry,         &
           atmosphere_diss_est,         & ! dissipation estimate for SKEB 
           atmosphere_get_bottom_layer, &
           atmosphere_nggps_diag,       &
-          set_atmosphere_pelist
+          set_atmosphere_pelist,       &
+          atmosphere_return_winds,     &
+          atmosphere_smooth_noise
 
 !--- physics/radiation data exchange routines
 public :: atmos_phys_driver_statein
@@ -1066,6 +1068,102 @@ contains
    return
  end subroutine atmosphere_scalar_field_halo
 
+ subroutine atmosphere_smooth_noise (wnoise,npass,ns_type,renorm_type)
+   use dyn_core_mod, only: del2_cubed,box_mean
+   
+   !--- interface variables ---
+   real,intent(inout)     :: wnoise(isd:ied,jsd:jed,1)
+   integer, intent(in) :: npass,ns_type,renorm_type
+   !--- local variables
+   integer:: i,j,nloops,nlast
+   real(kind=kind_phys) ::inflation(isc:iec,jsc:jec),inflation2
+   ! scale factor for restoring inflation
+   ! logic:  
+   ! if box mean: scalar get basic scaling, vector gets 1/grid dependent scaling  0-0 ; 0 - 1
+   ! if del2   : scalar gets grid dependent scaling,vector get basic scaling  1  0; 1 1
+   if(npass.GT.0) then
+      if (ns_type.EQ. 0) then
+          !inflation2=1.0/sqrt(1.0/(4.0*npass))
+          inflation2=1.0/sqrt(1.0/(9.0*npass))
+      else
+          inflation2=1.0/sqrt(1.0/(11.0/3.0*npass))
+      endif
+     if ( ns_type.EQ.1) then ! del2 smoothing needs to be scaled by grid-size
+        do j=jsc,jec
+           do i=isc,iec
+              inflation(i,j)=inflation2*Atm(mytile)%gridstruct%dxAV/(0.5*(Atm(mytile)%gridstruct%dx(i,j)+Atm(mytile)%gridstruct%dy(i,j)))
+           enddo
+        enddo
+     else  
+        if ( renorm_type.EQ.1) then  ! box smooth does not need scaling for scalar
+            do j=jsc,jec
+               do i=isc,iec
+                inflation(i,j)=inflation2
+               enddo
+            enddo
+        else 
+           ! box mean needs inversize grid-size scaling for vector
+           do j=jsc,jec
+              do i=isc,iec
+                 inflation(i,j)=inflation2*(0.5*(Atm(mytile)%gridstruct%dx(i,j)+Atm(mytile)%gridstruct%dy(i,j)))/Atm(mytile)%gridstruct%dxAV
+              enddo
+           enddo
+        endif
+     endif
+     print*,'inflation is',inflation(1,1),isc,iec
+     nloops=npass/3
+     nlast=mod(npass,3)
+     do j=1,nloops 
+        if (ns_type.EQ.1) then
+           call del2_cubed(wnoise , 0.25*Atm(mytile)%gridstruct%da_min, Atm(mytile)%gridstruct, &
+                           Atm(mytile)%domain, npx, npy, 1, 3, Atm(mytile)%bd)
+        else
+           call box_mean(wnoise , Atm(mytile)%gridstruct, Atm(mytile)%domain, Atm(mytile)%npx, Atm(mytile)%npy, 1, 3, Atm(mytile)%bd)
+        endif
+     enddo
+     if(nlast>0) then
+        if (ns_type.EQ.1) then
+           call del2_cubed(wnoise , 0.25*Atm(mytile)%gridstruct%da_min, Atm(mytile)%gridstruct, &
+                           Atm(mytile)%domain, npx, npy, 1, nlast, Atm(mytile)%bd)
+        else
+           call box_mean(wnoise , Atm(mytile)%gridstruct, Atm(mytile)%domain, Atm(mytile)%npx, Atm(mytile)%npy, 1, nlast, Atm(mytile)%bd)
+        endif
+     endif
+  ! restore amplitude
+    do j=jsc,jec
+       do i=isc,iec
+          wnoise(i,j,1)=wnoise(i,j,1)*inflation(i,j)
+       enddo
+    enddo
+   endif
+ end subroutine atmosphere_smooth_noise
+
+ subroutine atmosphere_return_winds (psi,ua,va,edge,km,vwts)
+ use dyn_core_mod, only: make_a_winds,make_c_winds
+ integer,intent(in) :: edge
+ real,intent(inout) :: psi(isd:ied,jsd:jed)
+ real,intent(inout) :: ua(isc:iec+edge,jsc:jec)
+ real,intent(inout) :: va(isc:iec,jsc:jec+edge)
+ integer, optional,intent(in):: km
+ real, optional,intent(in):: vwts(:)
+ integer :: k
+ call timing_on('COMM_TOTAL')
+ call mpp_update_domains(psi, Atm(mytile)%domain, complete=.true.)
+ call timing_off('COMM_TOTAL')
+ if (edge.EQ.0) then
+    call make_a_winds(ua, va, psi,Atm(mytile)%ng,Atm(mytile)%gridstruct,Atm(mytile)%bd,Atm(mytile)%npx,Atm(mytile)%npy)
+ endif
+ if (edge.EQ.1) then
+    call make_c_winds(ua, va, psi,Atm(mytile)%ng,Atm(mytile)%gridstruct,Atm(mytile)%bd,Atm(mytile)%npx,Atm(mytile)%npy)
+! populate wind perturbations right here
+    do k=1,km
+       Atm(mytile)%urandom_c(isc:iec+edge,jsc:jec     ,k)=ua*vwts(k) 
+       Atm(mytile)%vrandom_c(isc:iec     ,jsc:jec+edge,k)=va*vwts(k) 
+    enddo
+    !call mpp_update_domains(Atm(mytile)%urandom_c, Atm(mytile)%domain, complete=.true.)
+    !call mpp_update_domains(Atm(mytile)%vrandom_c, Atm(mytile)%domain, complete=.true.)
+ endif
+ end subroutine atmosphere_return_winds
 
  subroutine atmosphere_diss_est (npass)
    use dyn_core_mod, only: del2_cubed
